@@ -230,9 +230,33 @@ pub fn scan(root: &Path, progress: &mut dyn FnMut(usize)) -> Vec<Repo> {
     repos
 }
 
+/// The repos as lines of name, lines of code, language, first and last
+/// commit: `galaxy --tsv` writes it, and the web page reads it.
+pub fn to_tsv(repos: &[Repo]) -> String {
+    repos.iter().map(|r| format!("{}\t{}\t{}\t{}\t{}\n", r.name, r.lines, r.lang, r.born, r.last)).collect()
+}
+
+#[cfg_attr(not(target_os = "wasi"), allow(dead_code))]
+pub fn from_tsv(s: &str) -> Vec<Repo> {
+    s.lines().filter_map(|l| {
+        let f: Vec<&str> = l.split('\t').collect();
+        let [name, lines, lang, born, last] = f[..] else { return None };
+        Some(Repo { name: name.into(), path: PathBuf::from(name), head: String::new(),
+            lines: lines.parse().ok()?, lang: intern(lang), born: born.parse().ok()?, last: last.parse().ok()? })
+    }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_reads_back_as_written() {
+        let r = Repo { name: "glass".into(), path: PathBuf::from("glass"), head: String::new(),
+            lines: 21_000, lang: "Assembly", born: 1_700_000_000, last: 1_760_000_000 };
+        assert_eq!(from_tsv(&to_tsv(&[r.clone()])), [r]);
+        assert!(from_tsv("bad line\n").is_empty());
+    }
 
     #[test]
     fn extensions_and_scripts_name_their_language() {

@@ -4,11 +4,13 @@
 
 **Your repos as a spiral galaxy in the terminal. Written in Rust.**
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Rust](https://img.shields.io/badge/language-Rust-f74c00) ![License](https://img.shields.io/badge/license-Unlicense-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue) ![Stay Amazing](https://img.shields.io/badge/Stay-Amazing-important)
+![Version](https://img.shields.io/badge/version-0.1.1-blue) ![Rust](https://img.shields.io/badge/language-Rust-f74c00) ![License](https://img.shields.io/badge/license-Unlicense-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue) ![Stay Amazing](https://img.shields.io/badge/Stay-Amazing-important)
 
 Every repo in a folder becomes a star. Its size comes from its lines of code and its colour from its main language. The oldest repos sit by the core and the newest at the tips of the arms. A repo changed this week has spikes, and a commit made while galaxy is open makes its star flare. Enter opens the repo in [pointer](https://github.com/isene/pointer). Built on [Crust](https://github.com/isene/crust), part of the [Fe2O3 suite](https://github.com/isene/fe2o3).
 
 ![172 repos as a galaxy](img/screenshot.png)
+
+Try it in the browser, with my public repos: [isene.org/fe2o3/try/app.html?a=galaxy](https://isene.org/fe2o3/try/app.html?a=galaxy).
 
 In glass, or any terminal that shows images, the sky is real pixels; elsewhere it is drawn in half-block cells.
 
@@ -36,9 +38,10 @@ cp target/release/galaxy ~/.local/bin/
 
 ```
 galaxy [FOLDER]
+galaxy --tsv [FOLDER]
 ```
 
-`FOLDER` is the folder your repos are in. Without it galaxy reads `root = <folder>` from `~/.galaxyrc`, or else uses the current folder. The first start measures every repo on all cores; later starts read the cache.
+`FOLDER` is the folder your repos are in. Without it galaxy reads `root = <folder>` from `~/.galaxyrc`, or else uses the current folder. The first start measures every repo on all cores; later starts read the cache. `--tsv` prints each repo's name, lines, language, first and last commit, one per line; the web page draws such a list.
 
 ## Key Bindings
 

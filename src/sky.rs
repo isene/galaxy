@@ -94,44 +94,51 @@ pub fn backdrop(w: usize, h: usize) -> Vec<u8> {
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut grid = vec![[0f32; 6]; gw * gh];
     let per = gh.div_ceil(threads).max(1);
-    std::thread::scope(|s| {
-        for (band, chunk) in grid.chunks_mut(per * gw).enumerate() {
-            s.spawn(move || {
-                for (i, g) in chunk.iter_mut().enumerate() {
-                    let (x, y) = ((i % gw) * STEP, (band * per + i / gw) * STEP);
-                    *g = light((x as f64 - cx) / rx, (y as f64 - cy) / ry);
-                }
-            });
+    bands(&mut grid, per * gw, |band, chunk| {
+        for (i, g) in chunk.iter_mut().enumerate() {
+            let (x, y) = ((i % gw) * STEP, (band * per + i / gw) * STEP);
+            *g = light((x as f64 - cx) / rx, (y as f64 - cy) / ry);
         }
     });
     let mut px = vec![0u8; w * h * 4];
     let per = h.div_ceil(threads).max(1);
     let grid = &grid;
-    std::thread::scope(|s| {
-        for (band, chunk) in px.chunks_mut(per * w * 4).enumerate() {
-            s.spawn(move || {
-                for (i, p) in chunk.chunks_mut(4).enumerate() {
-                    let (x, y) = (i % w, band * per + i / w);
-                    let (gx, gy) = (x / STEP, y / STEP);
-                    let (fx, fy) = ((x % STEP) as f32 / STEP as f32, (y % STEP) as f32 / STEP as f32);
-                    let (a, b) = (&grid[gy * gw + gx], &grid[gy * gw + gx + 1]);
-                    let (c, d) = (&grid[(gy + 1) * gw + gx], &grid[(gy + 1) * gw + gx + 1]);
-                    let grain = 0.7 + 0.6 * hash(x as u64 * 7919 + y as u64 * 104729) as f32;
-                    for k in 0..3 {
-                        let at = |j: usize| {
-                            let top = a[j] + (b[j] - a[j]) * fx;
-                            top + (c[j] + (d[j] - c[j]) * fx - top) * fy
-                        };
-                        p[k] = ((at(k) + at(k + 3) * grain) * 0.9).min(255.0) as u8;
-                    }
-                    p[3] = 255;
-                }
-            });
+    bands(&mut px, per * w * 4, |band, chunk| {
+        for (i, p) in chunk.chunks_mut(4).enumerate() {
+            let (x, y) = (i % w, band * per + i / w);
+            let (gx, gy) = (x / STEP, y / STEP);
+            let (fx, fy) = ((x % STEP) as f32 / STEP as f32, (y % STEP) as f32 / STEP as f32);
+            let (a, b) = (&grid[gy * gw + gx], &grid[gy * gw + gx + 1]);
+            let (c, d) = (&grid[(gy + 1) * gw + gx], &grid[(gy + 1) * gw + gx + 1]);
+            let grain = 0.7 + 0.6 * hash(x as u64 * 7919 + y as u64 * 104729) as f32;
+            for k in 0..3 {
+                let at = |j: usize| {
+                    let top = a[j] + (b[j] - a[j]) * fx;
+                    top + (c[j] + (d[j] - c[j]) * fx - top) * fy
+                };
+                p[k] = ((at(k) + at(k + 3) * grain) * 0.9).min(255.0) as u8;
+            }
+            p[3] = 255;
         }
     });
     let mut cv = Canvas { cols: 1, rows: 1, cell: (1, 1), w, h, rgba: px };
     sprinkle(&mut cv);
     cv.rgba
+}
+
+/// Runs `f` on each band of `data`, a thread per band. The web page has
+/// one thread and no way to start another, so there the bands take turns.
+fn bands<T: Send>(data: &mut [T], per: usize, f: impl Fn(usize, &mut [T]) + Sync) {
+    if cfg!(target_os = "wasi") {
+        data.chunks_mut(per).enumerate().for_each(|(band, chunk)| f(band, chunk));
+        return;
+    }
+    let f = &f;
+    std::thread::scope(|s| {
+        for (band, chunk) in data.chunks_mut(per).enumerate() {
+            s.spawn(move || f(band, chunk));
+        }
+    });
 }
 
 /// The light at (u, v) on the unit disc: the core's red, green and blue,

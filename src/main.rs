@@ -2,6 +2,8 @@
 //! its lines of code and coloured by its language; the oldest by the
 //! core, the newest at the arm tips. A commit makes its star flare.
 
+#![cfg_attr(target_os = "wasi", allow(dead_code))]
+
 mod scan;
 mod sky;
 
@@ -141,7 +143,7 @@ fn main() {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("galaxy — your repos as a spiral galaxy (Fe2O3 suite)");
         println!();
-        println!("Usage: galaxy [FOLDER]");
+        println!("Usage: galaxy [FOLDER]      galaxy --tsv [FOLDER]");
         println!();
         println!("  FOLDER   the folder your repos are in; else `root = ...` in");
         println!("           ~/.galaxyrc; else the current folder");
@@ -152,6 +154,8 @@ fn main() {
         println!();
         println!("Keys: arrows  move    Tab / Shift-Tab  newer / older    /  find");
         println!("      Enter  open the repo in pointer    q  quit");
+        println!();
+        println!("--tsv prints each repo's name, lines, language, first and last commit.");
         return;
     }
     if args.iter().any(|a| a == "-v" || a == "--version") {
@@ -159,7 +163,15 @@ fn main() {
         return;
     }
     let root = root();
+    // The web page has no repos to scan; it hands over a list made by --tsv.
+    #[cfg(target_os = "wasi")]
+    let repos = scan::from_tsv(&std::fs::read_to_string("/home/web/.galaxy/repos.tsv").unwrap_or_default());
+    #[cfg(not(target_os = "wasi"))]
     let repos = scan::scan(&root, &mut |n| eprintln!("Measuring {n} repos..."));
+    if args.iter().any(|a| a == "--tsv") {
+        print!("{}", scan::to_tsv(&repos));
+        return;
+    }
     if repos.is_empty() {
         eprintln!("No git repos in {}. Give the folder they are in: galaxy ~/code", root.display());
         std::process::exit(1);
@@ -193,11 +205,18 @@ fn main() {
         let flaring = !app.flares.is_empty();
         // Block until a key or a commit. Only a running flare wakes on a
         // timer, and only until it ends.
+        #[cfg_attr(target_os = "wasi", allow(unused_mut))]
         let mut fds = [
             libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: watch.as_ref().map_or(-1, |w| w.fd()), events: libc::POLLIN, revents: 0 },
         ];
+        // The web page answers no poll; there crust waits for the key.
+        #[cfg(target_os = "wasi")]
+        let mut first = if flaring { Input::getchr_ms(80) } else { Input::getchr(None) };
+        #[cfg(not(target_os = "wasi"))]
+        let mut first: Option<String> = None;
         // SAFETY: two pollfds that live across the call.
+        #[cfg(not(target_os = "wasi"))]
         unsafe { libc::poll(fds.as_mut_ptr(), 2, if flaring { 80 } else { -1 }) };
         if fds[0].revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
             break;
@@ -214,7 +233,7 @@ fn main() {
         }
         let mut quit = false;
         // The terminal may hand over several keys at once: take them all.
-        while let Some(key) = Input::getchr_ms(0) {
+        while let Some(key) = first.take().or_else(|| Input::getchr_ms(0)) {
             app.note = None;
             let mut seen = true;
             match key.as_str() {
@@ -235,7 +254,10 @@ fn main() {
                         None => {}
                     }
                 }
+                #[cfg(not(target_os = "wasi"))]
                 "ENTER" => open_pointer(&mut app),
+                #[cfg(target_os = "wasi")]
+                "ENTER" => app.note = Some(format!(" Click to open {}", github(&app.repos[app.sel].name))),
                 "RESIZE" => {
                     Crust::clear_screen();
                 }
@@ -530,6 +552,13 @@ fn pill(name: &str, c: (u8, u8, u8), width: usize) -> String {
         style::rgb(&format!("▌{}", "━".repeat(bar)), Some(c), None, ""))
 }
 
+/// The repo's page, as a link a click opens.
+#[cfg(target_os = "wasi")]
+fn github(name: &str) -> String {
+    let url = format!("https://github.com/isene/{name}");
+    style::hyperlink(&url, &url[8..])
+}
+
 fn tilde(p: &Path) -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     match p.strip_prefix(&home) {
@@ -547,7 +576,10 @@ fn render_panel(app: &App, x: u16, h: u16) {
     out.push_str(&format!("\n {} · {} lines\n", style::rgb(r.lang, Some(c), None, "b"), thousands(r.lines)));
     out.push_str(&format!(" began    {}\n", ymd(r.born)));
     out.push_str(&format!(" changed  {}\n", ago(app.now - r.last)));
+    #[cfg(not(target_os = "wasi"))]
     out.push_str(&format!(" {}\n", style::dim(&tilde(&r.path))));
+    #[cfg(target_os = "wasi")]
+    out.push_str(&format!(" {}\n", github(&r.name)));
     out.push_str(&format!(" {} of {} by age\n\n", app.sel + 1, app.repos.len()));
     out.push_str(&pill("LANGUAGES", (153, 153, 204), w));
     out.push('\n');
@@ -588,7 +620,8 @@ fn render_bars(app: &App, cols: u16, rows: u16) {
     top.set_text(&head);
     top.refresh();
     let keys = app.note.clone().unwrap_or_else(||
-        " ←→↑↓ move · Tab newer · S-Tab older · / find · Enter pointer · q quit".into());
+        if cfg!(target_os = "wasi") { " ←→↑↓ move · Tab newer · S-Tab older · / find · Enter GitHub link" }
+        else { " ←→↑↓ move · Tab newer · S-Tab older · / find · Enter pointer · q quit" }.into());
     let mut bottom = Pane::new(1, rows, cols, 1, 244, 236);
     bottom.wrap = false;
     bottom.scroll = false;
