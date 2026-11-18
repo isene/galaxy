@@ -49,7 +49,7 @@ galaxy --tsv [FOLDER]
 |-----|--------|
 | ← ↑ ↓ → | Move to the nearest star that way |
 | Tab, Shift+Tab | The next newer / older repo |
-| / | Find a repo by name |
+| / | Find a repo as you type its name; Enter keeps it, Esc goes back |
 | Enter | Open the repo in pointer |
 | q | Quit |
 

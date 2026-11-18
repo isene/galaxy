@@ -1,6 +1,6 @@
 [package]
 name = "galaxy"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Geir Isene <g@isene.com>"]
 description = "Your repos as a spiral galaxy: a star for each, sized by its code, coloured by its language, flaring on a commit. Part of the Fe2O3 suite, built on crust."

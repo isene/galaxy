@@ -38,6 +38,9 @@ struct App {
     /// flare frame sends a few cells instead of the whole galaxy.
     patch: Option<glow::Display>,
     note: Option<String>,
+    /// While `/` finds as you type: the text so far, and the star picked
+    /// before, for Esc.
+    search: Option<(String, usize)>,
     now: i64,
 }
 
@@ -128,13 +131,38 @@ impl App {
         best.1
     }
 
+    /// The repo named `text`, else the first whose name starts with it,
+    /// else the first whose name holds it.
     fn find(&self, text: &str) -> Option<usize> {
-        let t = text.to_lowercase();
-        let hits = |exact: bool| self.repos.iter().position(|r| {
-            let n = r.name.to_lowercase();
-            if exact { n == t } else { n.contains(&t) }
-        });
-        hits(true).or_else(|| hits(false))
+        let t = text.trim().to_lowercase();
+        if t.is_empty() {
+            return None;
+        }
+        let hit = |f: &dyn Fn(&str) -> bool| self.repos.iter().position(|r| f(&r.name.to_lowercase()));
+        hit(&|n| n == t).or_else(|| hit(&|n| n.starts_with(&t))).or_else(|| hit(&|n| n.contains(&t)))
+    }
+
+    /// A key while finding: a letter or Backspace picks the best match at
+    /// once, if there is one. Enter keeps it, Esc goes back; any other key ends the finding
+    /// and does its own work. True when the key was used up here.
+    fn finding(&mut self, key: &str) -> bool {
+        let Some((text, before)) = self.search.as_mut() else { return false };
+        let before = *before;
+        match key {
+            "BACK" => { text.pop(); }
+            k if k.chars().count() == 1 => text.push_str(k),
+            k => {
+                self.search = None;
+                if k == "ESC" {
+                    self.sel = before;
+                }
+                return k == "ESC" || k == "ENTER";
+            }
+        }
+        let t = text.clone();
+        // A typo keeps the last match; all typed away goes back.
+        self.sel = if t.trim().is_empty() { before } else { self.find(&t).unwrap_or(self.sel) };
+        true
     }
 }
 
@@ -190,6 +218,7 @@ fn main() {
         images: None,
         patch: None,
         note: None,
+        search: None,
         now,
     };
     let watch = watch::Watch::new(&app.repos);
@@ -235,6 +264,10 @@ fn main() {
         // The terminal may hand over several keys at once: take them all.
         while let Some(key) = first.take().or_else(|| Input::getchr_ms(0)) {
             app.note = None;
+            if app.finding(&key) {
+                dirty = true;
+                continue;
+            }
             let mut seen = true;
             match key.as_str() {
                 "q" | "Q" => quit = true,
@@ -244,16 +277,7 @@ fn main() {
                 "DOWN" => app.sel = app.step(0.0, 1.0),
                 "TAB" => app.sel = (app.sel + 1) % app.repos.len(),
                 "S-TAB" => app.sel = (app.sel + app.repos.len() - 1) % app.repos.len(),
-                "/" => {
-                    let (cols, rows) = Crust::terminal_size();
-                    let mut ask = Pane::new(1, rows, cols, 1, 255, 236);
-                    let t = ask.ask("Find: ", "");
-                    match app.find(t.trim()) {
-                        Some(i) => app.sel = i,
-                        None if !t.trim().is_empty() => app.note = Some(format!("No repo named like \"{}\"", t.trim())),
-                        None => {}
-                    }
-                }
+                "/" => app.search = Some((String::new(), app.sel)),
                 #[cfg(not(target_os = "wasi"))]
                 "ENTER" => open_pointer(&mut app),
                 #[cfg(target_os = "wasi")]
@@ -619,7 +643,11 @@ fn render_bars(app: &App, cols: u16, rows: u16) {
     top.scroll = false;
     top.set_text(&head);
     top.refresh();
-    let keys = app.note.clone().unwrap_or_else(||
+    let finding = app.search.as_ref().map(|(t, _)| {
+        let miss = if !t.trim().is_empty() && app.find(t).is_none() { "no repo named like that · " } else { "" };
+        format!(" Find: {}{}   {miss}Enter keeps · Esc goes back", style::bold(t), style::reverse(" "))
+    });
+    let keys = finding.or_else(|| app.note.clone()).unwrap_or_else(||
         if cfg!(target_os = "wasi") { " ←→↑↓ move · Tab newer · S-Tab older · / find · Enter GitHub link" }
         else { " ←→↑↓ move · Tab newer · S-Tab older · / find · Enter pointer · q quit" }.into());
     let mut bottom = Pane::new(1, rows, cols, 1, 244, 236);
@@ -711,5 +739,30 @@ mod tests {
         assert_eq!(thousands(999), "999");
         assert_eq!(short(275923), "276k");
         assert_eq!(ago(3 * 86400), "3 days ago");
+    }
+
+    #[test]
+    fn slash_finds_as_you_type() {
+        let repos = scan::from_tsv("galaxy\t1\tRust\t1\t2\nglow\t1\tRust\t1\t2\nglass\t1\tRust\t1\t2\nbigglass\t1\tRust\t1\t2\n");
+        let mut app = App { pos: vec![(0.0, 0.0); repos.len()], repos, sel: 0, flares: Vec::new(), backdrop: None, layer: None,
+            generation: 0, canvas: (0, 0), images: None, patch: None, note: None, search: None, now: 0 };
+        app.search = Some((String::new(), 0));
+        let typed = |app: &mut App, keys: &[&str]| keys.iter().for_each(|k| assert!(app.finding(k)));
+        typed(&mut app, &["g", "l"]);
+        assert_eq!(app.repos[app.sel].name, "glow", "the first name that starts with it");
+        typed(&mut app, &["a"]);
+        assert_eq!(app.repos[app.sel].name, "glass");
+        typed(&mut app, &["z"]);
+        assert_eq!(app.repos[app.sel].name, "glass", "a typo keeps the last match");
+        typed(&mut app, &["BACK"]);
+        typed(&mut app, &["s", "s", "BACK", "BACK", "BACK", "BACK", "BACK"]);
+        assert_eq!(app.sel, 0, "all typed away: back where it was");
+        typed(&mut app, &["b", "i"]);
+        assert_eq!(app.repos[app.sel].name, "bigglass");
+        assert!(app.finding("ESC") && app.sel == 0 && app.search.is_none(), "Esc goes back");
+        app.search = Some((String::new(), 0));
+        typed(&mut app, &["g", "a"]);
+        assert!(!app.finding("RIGHT") && app.search.is_none(), "an arrow ends the finding and moves");
+        assert_eq!(app.repos[app.sel].name, "galaxy");
     }
 }
