@@ -653,7 +653,12 @@ fn render_bars(app: &App, cols: u16, rows: u16) {
     let mut bottom = Pane::new(1, rows, cols, 1, 244, 236);
     bottom.wrap = false;
     bottom.scroll = false;
-    bottom.set_text(&keys);
+    // The version at the right end, amber once a rebuild replaced galaxy.
+    let version = crust::version_tag("galaxy", env!("CARGO_PKG_VERSION"));
+    let room = (cols as usize).saturating_sub(crust::display_width(&version) + 1);
+    let keys = crust::truncate_ansi(&keys, room);
+    let pad = (cols as usize).saturating_sub(crust::display_width(&keys) + crust::display_width(&version));
+    bottom.set_text(&format!("{keys}{}{version}", " ".repeat(pad)));
     bottom.refresh();
 }
 
